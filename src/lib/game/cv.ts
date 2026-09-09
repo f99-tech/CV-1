@@ -6,6 +6,8 @@ const MODEL =
 
 type Landmark = { x: number; y: number; z?: number };
 
+type VisionFrame = HTMLVideoElement | HTMLCanvasElement;
+
 type GestureApi = {
   FilesetResolver: {
     forVisionTasks: (p: string) => Promise<unknown>;
@@ -16,7 +18,7 @@ type GestureApi = {
       opts: Record<string, unknown>,
     ) => Promise<{
       detectForVideo: (
-        video: HTMLVideoElement,
+        image: VisionFrame,
         ts: number,
       ) => {
         gestures: Array<Array<{ categoryName: string; score: number }>>;
@@ -31,6 +33,7 @@ type GestureApi = {
 let recognizer: Awaited<ReturnType<GestureApi["GestureRecognizer"]["createFromOptions"]>> | null =
   null;
 let loadPromise: Promise<void> | null = null;
+let stamp = 0;
 
 export function loadVision(): Promise<void> {
   if (recognizer) return Promise.resolve();
@@ -39,14 +42,17 @@ export function loadVision(): Promise<void> {
     const mod = (await import("@mediapipe/tasks-vision")) as unknown as GestureApi;
     const files = await mod.FilesetResolver.forVisionTasks(WASM);
     recognizer = await mod.GestureRecognizer.createFromOptions(files, {
-      baseOptions: { modelAssetPath: MODEL },
+      baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
       runningMode: "VIDEO",
       numHands: 1,
-      minHandDetectionConfidence: 0.45,
-      minHandPresenceConfidence: 0.45,
-      minTrackingConfidence: 0.4,
+      minHandDetectionConfidence: 0.35,
+      minHandPresenceConfidence: 0.35,
+      minTrackingConfidence: 0.35,
     });
-  })();
+  })().catch((err) => {
+    loadPromise = null;
+    throw err;
+  });
   return loadPromise;
 }
 
@@ -91,7 +97,7 @@ export function classifyGeometry(lm: Landmark[]): { move: Move | null; conf: num
   return { move: null, conf: 0.2, label: "geometry:ambiguous" };
 }
 
-export function detectFrame(video: HTMLVideoElement, ts: number): Detection {
+export function detectFrame(frame: VisionFrame, ts: number): Detection {
   const empty: Detection = {
     move: null,
     gestureLabel: "none",
@@ -100,9 +106,16 @@ export function detectFrame(video: HTMLVideoElement, ts: number): Detection {
     handedness: "",
     landmarks: null,
   };
-  if (!recognizer || video.readyState < 2) return empty;
+  if (!recognizer) return empty;
 
-  const result = recognizer.detectForVideo(video, ts);
+  stamp = Math.max(stamp + 16, Math.floor(ts));
+  let result: ReturnType<(typeof recognizer)["detectForVideo"]>;
+  try {
+    result = recognizer.detectForVideo(frame, stamp);
+  } catch {
+    return empty;
+  }
+
   const lm = result.landmarks?.[0] ?? null;
   const g = result.gestures?.[0]?.[0];
   const hand = result.handedness?.[0]?.[0]?.categoryName ?? "";
@@ -116,7 +129,7 @@ export function detectFrame(video: HTMLVideoElement, ts: number): Detection {
   let conf = 0;
   let label = "none";
 
-  if (gMove && gScore >= 0.45) {
+  if (gMove && gScore >= 0.4) {
     move = gMove;
     conf = gScore;
     label = g.categoryName;

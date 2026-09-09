@@ -29,12 +29,42 @@ const CONNECTIONS: Array<[number, number]> = [
   [0, 17],
 ];
 
+async function openCamera(): Promise<MediaStream> {
+  const tries: MediaStreamConstraints[] = [
+    {
+      audio: false,
+      video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } },
+    },
+    { audio: false, video: { facingMode: "user" } },
+    { audio: false, video: true },
+  ];
+  let last: unknown;
+  for (const constraint of tries) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraint);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error("camera denied");
+}
+
+function armVideo(v: HTMLVideoElement, stream: MediaStream) {
+  v.setAttribute("playsinline", "true");
+  v.setAttribute("webkit-playsinline", "true");
+  v.playsInline = true;
+  v.muted = true;
+  v.autoplay = true;
+  v.srcObject = stream;
+  return v.play().catch(() => undefined);
+}
+
 export function CameraStage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const snapRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const lastTs = useRef(-1);
-  const { cameraOn, setCameraOn, setLive, markCv, live, lang, phase, cvReady } = useGame();
+  const { cameraOn, setCameraOn, setLive, markCv, live, lang, phase, cvReady, cvError } = useGame();
   const t = copy[lang];
 
   useEffect(() => {
@@ -62,10 +92,7 @@ export function CameraStage() {
     let stop = false;
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
-          audio: false,
-        });
+        const stream = await openCamera();
         if (stop) {
           stream.getTracks().forEach((tr) => tr.stop());
           return;
@@ -73,8 +100,7 @@ export function CameraStage() {
         streamRef.current = stream;
         const v = videoRef.current;
         if (!v) return;
-        v.srcObject = stream;
-        await v.play().catch(() => undefined);
+        await armVideo(v, stream);
       } catch (err) {
         setCameraOn(false);
         markCv(useGame.getState().cvReady, err instanceof Error ? err.message : "camera denied");
@@ -91,12 +117,25 @@ export function CameraStage() {
     let id = 0;
     const loop = (ts: number) => {
       const v = videoRef.current;
-      const c = canvasRef.current;
-      if (v && c && cameraOn && v.readyState >= 2 && v.currentTime !== lastTs.current) {
-        lastTs.current = v.currentTime;
-        const det = detectFrame(v, ts);
-        setLive(det);
-        drawHand(c, v, det.landmarks);
+      const overlay = canvasRef.current;
+      if (v && overlay && cameraOn && v.readyState >= 2 && v.videoWidth >= 16) {
+        if (!snapRef.current) snapRef.current = document.createElement("canvas");
+        const snap = snapRef.current;
+        if (snap.width !== v.videoWidth || snap.height !== v.videoHeight) {
+          snap.width = v.videoWidth;
+          snap.height = v.videoHeight;
+        }
+        const sctx = snap.getContext("2d", { willReadFrequently: true });
+        if (sctx) {
+          sctx.drawImage(v, 0, 0);
+          try {
+            const det = detectFrame(snap, ts);
+            setLive(det);
+            drawHand(overlay, snap.width, snap.height, det.landmarks);
+          } catch {
+            // keep last live reading
+          }
+        }
       }
       id = requestAnimationFrame(loop);
     };
@@ -105,7 +144,13 @@ export function CameraStage() {
   }, [cameraOn, setLive]);
 
   const signName =
-    live?.move === "rock" ? t.throwRock : live?.move === "paper" ? t.throwPaper : live?.move === "scissors" ? t.throwScissors : null;
+    live?.move === "rock"
+      ? t.throwRock
+      : live?.move === "paper"
+        ? t.throwPaper
+        : live?.move === "scissors"
+          ? t.throwScissors
+          : null;
 
   return (
     <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl bg-elevated sm:aspect-square">
@@ -116,12 +161,16 @@ export function CameraStage() {
         muted
         autoPlay
       />
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full scale-x-[-1]" />
-      <div className="scanlines absolute inset-0" />
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute inset-0 h-full w-full scale-x-[-1]"
+      />
+      <div className="scanlines pointer-events-none absolute inset-0" />
       {!cameraOn && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-elevated px-6 text-center">
           <p className="font-display text-lg text-fg">{t.cameraOff}</p>
           <p className="max-w-xs text-sm text-muted">{t.cameraNeed}</p>
+          {cvError && <p className="max-w-xs text-xs text-primary">{cvError}</p>}
           <button
             type="button"
             className="min-h-11 rounded-full bg-primary px-5 text-sm font-semibold text-primary-fg"
@@ -159,11 +208,10 @@ export function CameraStage() {
 
 function drawHand(
   canvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
+  w: number,
+  h: number,
   lm: Array<{ x: number; y: number }> | null,
 ) {
-  const w = video.videoWidth || 640;
-  const h = video.videoHeight || 480;
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
