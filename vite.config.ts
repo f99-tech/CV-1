@@ -1,24 +1,19 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { nitro } from "nitro/vite";
 
-export default defineConfig(({ command, isPreview }) => ({
-  server: {
-    host: "0.0.0.0",
-    port: 8080,
-    strictPort: true,
+const root = dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  base: "./",
+  plugins: [tailwindcss(), viteReact()],
+  resolve: {
+    alias: { "@": resolve(root, "src") },
   },
-  preview: {
-    host: "127.0.0.1",
-    port: 4173,
+  build: {
+    outDir: "docs",
+    emptyOutDir: true,
   },
-  resolve: { tsconfigPaths: true },
-  plugins: [
-    tailwindcss(),
-    tanstackStart(),
-    ...(command === "build" || isPreview ? [nitro({ preset: "vercel" })] : []),
-    viteReact(),
-  ],
-}));
+});

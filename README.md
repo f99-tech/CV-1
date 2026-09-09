@@ -2,7 +2,25 @@
 
 Webcam **rock · paper · scissors** versus a bot. Built for phones.
 
+Play: [https://f99-tech.github.io/CV-1/](https://f99-tech.github.io/CV-1/)
+
 Repo: [f99-tech/CV-1](https://github.com/f99-tech/CV-1)
+
+## GitHub Pages (the playable link)
+
+Use **branch `main` + folder `/docs`**. Do **not** pick `/ (root)`.
+
+1. Open the repo → **Settings** → **Pages**
+2. **Source:** Deploy from a branch
+3. **Branch:** `main`
+4. **Folder:** `/docs`
+5. Save
+
+The live URL is:
+
+`https://f99-tech.github.io/CV-1/`
+
+Open it on your phone over HTTPS and allow the camera.
 
 ## Play
 
@@ -12,31 +30,19 @@ Repo: [f99-tech/CV-1](https://github.com/f99-tech/CV-1)
 4. Tap **Lock in**. On **SHOOT**, hold rock (fist), paper (open palm), or scissors (V).
 5. No camera? Use the three throw buttons.
 
-## Vision stack (three sources)
+## Vision stack
 
-1. **MediaPipe Gesture Recognizer** — Google model trained on the HaGRID gesture set. Maps `Closed_Fist` → rock, `Open_Palm` → paper, `Victory` → scissors.
-2. **21-point 3D landmark geometry** — finger extension from MediaPipe landmarks.
-3. **Temporal majority lock** — weighted votes across the countdown + shoot window.
+1. MediaPipe Gesture Recognizer (HaGRID): fist → rock, palm → paper, V → scissors
+2. 21-point 3D landmark geometry
+3. Temporal majority lock
 
-The bot picks **before** your lock is applied (no peeking). Video never leaves the device.
+Video never leaves the device.
 
-## Run locally
+## Rebuild Pages files
 
 ```bash
 npm install
-npm run dev
+npm run build
 ```
 
-Open over **HTTPS** (or localhost). Cameras require a secure context.
-
-## Live HTTPS link (phone camera)
-
-GitHub Pages cannot run this app’s Node server.
-
-Import this repo on **Vercel** for a public HTTPS URL:
-
-1. Open [vercel.com/new](https://vercel.com/new)
-2. Import `f99-tech/CV-1`
-3. Deploy
-
-Then open the Vercel URL on your phone and allow the camera.
+That writes the static site into `docs/`.
