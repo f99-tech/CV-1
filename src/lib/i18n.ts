@@ -17,8 +17,7 @@ export const copy = {
     detecting: "Reading hand",
     noHand: "No hand",
     cameraOff: "Camera off",
-    cameraNeed:
-      "This preview may block the camera. On your phone, open the live link over HTTPS and allow the lens. Buttons still work here.",
+    cameraNeed: "Allow the camera, then face your palm to the lens. You can also throw with the buttons.",
     allowCamera: "Enable camera",
     useButtons: "Throw with buttons",
     loadingCv: "Loading vision models",
@@ -65,8 +64,7 @@ export const copy = {
     detecting: "قراءة اليد",
     noHand: "لا توجد يد",
     cameraOff: "الكاميرا مغلقة",
-    cameraNeed:
-      "قد تُحجب الكاميرا في المعاينة. على هاتفك افتح الرابط عبر HTTPS واسمح بالعدسة. الأزرار تعمل هنا.",
+    cameraNeed: "اسمح للكاميرا ثم واجه راحة يدك للعدسة. يمكنك أيضاً الرمي بالأزرار.",
     allowCamera: "تشغيل الكاميرا",
     useButtons: "اللعب بالأزرار",
     loadingCv: "تحميل نماذج الرؤية",
