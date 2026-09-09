@@ -1,54 +1,80 @@
 import type { Detection, Move } from "./types";
+import { lookupSign, type Landmark } from "./rps-db";
 
-const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm";
-const MODEL =
-  "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task";
+function visionUrl(path: string) {
+  const base = import.meta.env.BASE_URL || "/";
+  const root = base.endsWith("/") ? base : `${base}/`;
+  return `${root}${path.replace(/^\//, "")}`;
+}
 
-type Landmark = { x: number; y: number; z?: number };
+const WASM_LOCAL = visionUrl("vision/wasm");
+const WASM_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm";
+const HAND_MODEL = visionUrl("vision/hand_landmarker.task");
+const GESTURE_MODEL = visionUrl("vision/gesture_recognizer.task");
 
-type VisionFrame = HTMLVideoElement | HTMLCanvasElement;
+type VisionFrame = HTMLVideoElement | HTMLCanvasElement | HTMLImageElement;
 
-type GestureApi = {
-  FilesetResolver: {
-    forVisionTasks: (p: string) => Promise<unknown>;
+type HandsResult = {
+  landmarks?: Landmark[][];
+  handedness?: Array<Array<{ categoryName: string; score?: number }>>;
+};
+
+type GestureResult = {
+  gestures?: Array<Array<{ categoryName: string; score: number }>>;
+  landmarks?: Landmark[][];
+  handedness?: Array<Array<{ categoryName: string }>>;
+};
+
+type VisionMod = {
+  FilesetResolver: { forVisionTasks: (p: string) => Promise<unknown> };
+  HandLandmarker: {
+    createFromOptions: (
+      files: unknown,
+      opts: Record<string, unknown>,
+    ) => Promise<{ detect: (image: VisionFrame) => HandsResult; close: () => void }>;
   };
   GestureRecognizer: {
     createFromOptions: (
       files: unknown,
       opts: Record<string, unknown>,
-    ) => Promise<{
-      detectForVideo: (
-        image: VisionFrame,
-        ts: number,
-      ) => {
-        gestures: Array<Array<{ categoryName: string; score: number }>>;
-        landmarks: Landmark[][];
-        handedness: Array<Array<{ categoryName: string }>>;
-      };
-      close: () => void;
-    }>;
+    ) => Promise<{ recognize: (image: VisionFrame) => GestureResult; close: () => void }>;
   };
 };
 
-let recognizer: Awaited<ReturnType<GestureApi["GestureRecognizer"]["createFromOptions"]>> | null =
-  null;
+let hands: Awaited<ReturnType<VisionMod["HandLandmarker"]["createFromOptions"]>> | null = null;
+let gestures: Awaited<ReturnType<VisionMod["GestureRecognizer"]["createFromOptions"]>> | null = null;
 let loadPromise: Promise<void> | null = null;
-let stamp = 0;
 
 export function loadVision(): Promise<void> {
-  if (recognizer) return Promise.resolve();
+  if (hands) return Promise.resolve();
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    const mod = (await import("@mediapipe/tasks-vision")) as unknown as GestureApi;
-    const files = await mod.FilesetResolver.forVisionTasks(WASM);
-    recognizer = await mod.GestureRecognizer.createFromOptions(files, {
-      baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
-      runningMode: "VIDEO",
+    const mod = (await import("@mediapipe/tasks-vision")) as unknown as VisionMod;
+    let files: unknown;
+    try {
+      files = await mod.FilesetResolver.forVisionTasks(WASM_LOCAL);
+    } catch {
+      files = await mod.FilesetResolver.forVisionTasks(WASM_CDN);
+    }
+    hands = await mod.HandLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: HAND_MODEL, delegate: "CPU" },
+      runningMode: "IMAGE",
       numHands: 1,
-      minHandDetectionConfidence: 0.35,
-      minHandPresenceConfidence: 0.35,
-      minTrackingConfidence: 0.35,
+      minHandDetectionConfidence: 0.2,
+      minHandPresenceConfidence: 0.2,
+      minTrackingConfidence: 0.2,
     });
+    try {
+      gestures = await mod.GestureRecognizer.createFromOptions(files, {
+        baseOptions: { modelAssetPath: GESTURE_MODEL, delegate: "CPU" },
+        runningMode: "IMAGE",
+        numHands: 1,
+        minHandDetectionConfidence: 0.2,
+        minHandPresenceConfidence: 0.2,
+      });
+    } catch {
+      gestures = null;
+    }
   })().catch((err) => {
     loadPromise = null;
     throw err;
@@ -57,7 +83,7 @@ export function loadVision(): Promise<void> {
 }
 
 export function visionReady() {
-  return Boolean(recognizer);
+  return Boolean(hands);
 }
 
 const GESTURE_MAP: Record<string, Move> = {
@@ -66,85 +92,69 @@ const GESTURE_MAP: Record<string, Move> = {
   Victory: "scissors",
 };
 
-function dist(a: Landmark, b: Landmark) {
-  const dz = (a.z ?? 0) - (b.z ?? 0);
-  return Math.hypot(a.x - b.x, a.y - b.y, dz);
-}
-
-function extended(lm: Landmark[], tip: number, pip: number, mcp: number) {
-  return dist(lm[tip]!, lm[mcp]!) > dist(lm[pip]!, lm[mcp]!) * 1.12;
-}
-
-/** Source 2 — 3D landmark geometry (fist / V / palm), camera-angle tolerant. */
-export function classifyGeometry(lm: Landmark[]): { move: Move | null; conf: number; label: string } {
-  if (lm.length < 21) return { move: null, conf: 0, label: "none" };
-  const index = extended(lm, 8, 6, 5);
-  const middle = extended(lm, 12, 10, 9);
-  const ring = extended(lm, 16, 14, 13);
-  const pinky = extended(lm, 20, 18, 17);
-  const thumb = dist(lm[4]!, lm[0]!) > dist(lm[2]!, lm[0]!) * 1.12;
-  const open = Number(index) + Number(middle) + Number(ring) + Number(pinky);
-
-  if (index && middle && !ring && !pinky) {
-    return { move: "scissors", conf: 0.84, label: "geometry:V" };
-  }
-  if (open >= 3 && thumb) {
-    return { move: "paper", conf: 0.8, label: "geometry:palm" };
-  }
-  if (open <= 1) {
-    return { move: "rock", conf: 0.8, label: "geometry:fist" };
-  }
-  return { move: null, conf: 0.2, label: "geometry:ambiguous" };
-}
-
-export function detectFrame(frame: VisionFrame, ts: number): Detection {
+export function detectFrame(frame: VisionFrame): Detection {
   const empty: Detection = {
     move: null,
     gestureLabel: "none",
     confidence: 0,
-    source: "gesture",
+    source: "geometry",
     handedness: "",
     landmarks: null,
   };
-  if (!recognizer) return empty;
+  if (!hands) return empty;
 
-  stamp = Math.max(stamp + 16, Math.floor(ts));
-  let result: ReturnType<(typeof recognizer)["detectForVideo"]>;
+  let lm: Landmark[] | null = null;
+  let hand = "";
+  let gMove: Move | null = null;
+  let gScore = 0;
+  let gLabel = "none";
+
   try {
-    result = recognizer.detectForVideo(frame, stamp);
+    const h = hands.detect(frame);
+    lm = h.landmarks?.[0] ?? null;
+    hand = h.handedness?.[0]?.[0]?.categoryName ?? "";
   } catch {
     return empty;
   }
 
-  const lm = result.landmarks?.[0] ?? null;
-  const g = result.gestures?.[0]?.[0];
-  const hand = result.handedness?.[0]?.[0]?.categoryName ?? "";
+  if (gestures) {
+    try {
+      const g = gestures.recognize(frame);
+      if (!lm) lm = g.landmarks?.[0] ?? null;
+      const top = g.gestures?.[0]?.[0];
+      if (top && GESTURE_MAP[top.categoryName] && top.score >= 0.35) {
+        gMove = GESTURE_MAP[top.categoryName]!;
+        gScore = top.score;
+        gLabel = top.categoryName;
+      }
+    } catch {
+      // hand landmarks still usable
+    }
+  }
 
-  const geo = lm ? classifyGeometry(lm) : { move: null, conf: 0, label: "none" };
-  const gMove = g ? (GESTURE_MAP[g.categoryName] ?? null) : null;
-  const gScore = g?.score ?? 0;
+  const db = lm ? lookupSign(lm) : null;
 
   let move: Move | null = null;
-  let source: Detection["source"] = "gesture";
+  let source: Detection["source"] = "geometry";
   let conf = 0;
   let label = "none";
 
-  if (gMove && gScore >= 0.4) {
+  if (db) {
+    move = db.move;
+    conf = db.conf;
+    label = db.label;
+    source = "geometry";
+  }
+  if (gMove && gScore >= 0.5 && (!move || gScore > conf)) {
     move = gMove;
     conf = gScore;
-    label = g.categoryName;
+    label = gLabel;
     source = "gesture";
-    if (geo.move && geo.move !== gMove && geo.conf > gScore) {
-      move = geo.move;
-      conf = geo.conf;
-      label = geo.label;
-      source = "geometry";
-    }
-  } else if (geo.move) {
-    move = geo.move;
-    conf = geo.conf;
-    label = geo.label;
-    source = "geometry";
+  } else if (gMove && db && gMove === db.move) {
+    move = gMove;
+    conf = Math.max(gScore, db.conf);
+    label = `${db.label}+${gLabel}`;
+    source = "gesture";
   }
 
   return {
@@ -161,7 +171,7 @@ export function voteMove(buffer: Detection[]): { move: Move | null; conf: number
   const counts: Record<Move, number> = { rock: 0, paper: 0, scissors: 0 };
   let n = 0;
   for (const d of buffer) {
-    if (!d.move || d.confidence < 0.32) continue;
+    if (!d.move || d.confidence < 0.3) continue;
     counts[d.move] += d.confidence;
     n += 1;
   }

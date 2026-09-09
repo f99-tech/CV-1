@@ -62,7 +62,7 @@ function armVideo(v: HTMLVideoElement, stream: MediaStream) {
 export function CameraStage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const snapRef = useRef<HTMLCanvasElement | null>(null);
+  const snapRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { cameraOn, setCameraOn, setLive, markCv, live, lang, phase, cvReady, cvError } = useGame();
   const t = copy[lang];
@@ -115,12 +115,11 @@ export function CameraStage() {
 
   useEffect(() => {
     let id = 0;
-    const loop = (ts: number) => {
+    const loop = () => {
       const v = videoRef.current;
       const overlay = canvasRef.current;
-      if (v && overlay && cameraOn && v.readyState >= 2 && v.videoWidth >= 16) {
-        if (!snapRef.current) snapRef.current = document.createElement("canvas");
-        const snap = snapRef.current;
+      const snap = snapRef.current;
+      if (v && overlay && snap && cameraOn && v.readyState >= 2 && v.videoWidth >= 16) {
         if (snap.width !== v.videoWidth || snap.height !== v.videoHeight) {
           snap.width = v.videoWidth;
           snap.height = v.videoHeight;
@@ -129,9 +128,10 @@ export function CameraStage() {
         if (sctx) {
           sctx.drawImage(v, 0, 0);
           try {
-            const det = detectFrame(snap, ts);
+            let det = detectFrame(snap);
+            if (!det.landmarks) det = detectFrame(v);
             setLive(det);
-            drawHand(overlay, snap.width, snap.height, det.landmarks);
+            drawHand(overlay, v.videoWidth, v.videoHeight, det.landmarks);
           } catch {
             // keep last live reading
           }
@@ -165,6 +165,7 @@ export function CameraStage() {
         ref={canvasRef}
         className="pointer-events-none absolute inset-0 h-full w-full scale-x-[-1]"
       />
+      <canvas ref={snapRef} className="pointer-events-none absolute inset-0 opacity-0" />
       <div className="scanlines pointer-events-none absolute inset-0" />
       {!cameraOn && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-elevated px-6 text-center">
