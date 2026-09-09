@@ -24,12 +24,11 @@ import {
 } from "@/lib/game/audio";
 import { neededWins } from "@/lib/game/rules";
 import { applyTheme, useGame } from "@/lib/game/store";
-import type { Move, Series } from "@/lib/game/types";
+import type { Series } from "@/lib/game/types";
 import { copy } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const SERIES: Series[] = [3, 5, 7, 9];
-const THROWS: Move[] = ["rock", "paper", "scissors"];
 
 export function GameApp() {
   const lang = useGame((s) => s.lang);
@@ -250,7 +249,8 @@ function Arena() {
   const outcome = useGame((s) => s.outcome);
   const matchWinner = useGame((s) => s.matchWinner);
   const missed = useGame((s) => s.missed);
-  const live = useGame((s) => s.live);
+  const cameraOn = useGame((s) => s.cameraOn);
+  const cvReady = useGame((s) => s.cvReady);
 
   const countLabel =
     phase === "countdown" ? String(Math.max(1, Math.ceil(countdown))) : phase === "throwing" ? t.shoot : null;
@@ -269,6 +269,9 @@ function Arena() {
         : missed
           ? t.missed
           : null;
+
+  const youLabel =
+    playerMove === "rock" ? t.throwRock : playerMove === "paper" ? t.throwPaper : playerMove === "scissors" ? t.throwScissors : playerMove;
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-3xl px-4 pb-8">
@@ -329,47 +332,39 @@ function Arena() {
 
       {playerMove && (phase === "reveal" || phase === "roundEnd" || phase === "matchEnd") && (
         <p className="mt-1 text-center text-sm text-muted">
-          {t.you}: {playerMove}
-          {live?.source ? ` · ${live.source}` : ""}
+          {t.you}: {youLabel}
         </p>
       )}
-
-      <div className="mt-5 grid grid-cols-3 gap-2">
-        {THROWS.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              unlockAudio();
-              useGame.getState().lockManual(m);
-            }}
-            className={cn(
-              "flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl border bg-surface",
-              playerMove === m ? "border-primary text-primary" : "border-border text-fg",
-            )}
-          >
-            <span className="size-8">
-              <SignGlyph move={m} />
-            </span>
-            <span className="text-xs font-medium">
-              {m === "rock" ? t.throwRock : m === "paper" ? t.throwPaper : t.throwScissors}
-            </span>
-          </button>
-        ))}
-      </div>
 
       <div className="mt-4 flex gap-2">
         {phase === "idle" && (
           <button
             type="button"
-            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-primary font-semibold text-primary-fg"
+            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-primary font-semibold text-primary-fg disabled:opacity-60"
             onClick={() => {
               unlockAudio();
-              useGame.getState().startCountdown();
+              const s = useGame.getState();
+              if (!s.cameraOn) {
+                s.setCameraOn(true);
+                return;
+              }
+              if (!s.cvReady) return;
+              s.startCountdown();
             }}
           >
-            <Play className="size-4" fill="currentColor" />
-            {t.countdown}
+            {!cameraOn ? (
+              <>
+                <Camera className="size-4" />
+                {t.allowCamera}
+              </>
+            ) : !cvReady ? (
+              t.loadingCv
+            ) : (
+              <>
+                <Play className="size-4" fill="currentColor" />
+                {t.countdown}
+              </>
+            )}
           </button>
         )}
         {phase === "matchEnd" && (

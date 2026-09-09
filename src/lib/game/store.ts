@@ -47,10 +47,14 @@ type GameState = {
   setLive: (d: Detection | null) => void;
   startCountdown: () => void;
   tick: (dt: number) => void;
-  lockManual: (move: Move) => void;
   playAgain: () => void;
   backTitle: () => void;
 };
+
+function collectVote(votes: Detection[], live: Detection | null) {
+  if (!live?.move) return votes;
+  return [...votes, live].slice(-36);
+}
 
 export function applyTheme(theme: "dark" | "light") {
   if (typeof document === "undefined") return;
@@ -100,62 +104,76 @@ export const useGame = create<GameState>((set, get) => ({
   markCv: (ok, err) => set({ cvReady: ok, cvError: err ?? null }),
   setCameraOn: (cameraOn) => set({ cameraOn }),
   setLive: (live) => set({ live }),
-  startCountdown: () =>
+  startCountdown: () => {
+    const s = get();
+    if (!s.cameraOn) return;
     set({
       phase: "countdown",
       countdown: 3,
       lastBeep: 4,
       throwLeft: 0,
-      playerMove: get().playerMove,
+      playerMove: null,
       botMove: null,
       outcome: null,
-      votes: get().playerMove
-        ? [{ move: get().playerMove, gestureLabel: "manual", confidence: 1, source: "manual", handedness: "", landmarks: null }]
-        : [],
+      votes: [],
       missed: false,
-    }),
-  lockManual: (move) => {
-    const s = get();
-    if (s.phase === "matchEnd" || s.phase === "title" || s.phase === "setup") return;
-    set({
-      playerMove: move,
-      votes: [{ move, gestureLabel: "manual", confidence: 1, source: "manual", handedness: "", landmarks: null }],
     });
-    if (s.phase === "idle") get().startCountdown();
   },
   tick: (dt) => {
     const s = get();
     const trauma = Math.max(0, s.trauma - dt * 1.8);
+
     if (s.phase === "countdown") {
       const next = s.countdown - dt;
-      const live = s.live;
-      const votes = live?.move && live.source !== "manual" ? [...s.votes, live].slice(-24) : s.votes;
+      const votes = collectVote(s.votes, s.live);
       if (next <= 0) {
         const botMove = pickBotMove(s.history.map((h) => ({ player: h.player, bot: h.bot })));
-        set({ phase: "throwing", countdown: 0, throwLeft: 0.6, botMove, trauma, votes });
+        set({
+          phase: "throwing",
+          countdown: 0,
+          throwLeft: 1.05,
+          botMove,
+          trauma,
+          votes,
+        });
         return;
       }
       set({ countdown: next, trauma, votes });
       return;
     }
+
     if (s.phase === "throwing") {
-      const live = s.live;
-      const votes = live ? [...s.votes, live].slice(-24) : s.votes;
+      const votes = collectVote(s.votes, s.live);
       const left = s.throwLeft - dt;
       if (left <= 0) {
         const voted = voteMove(votes);
-        const playerMove = s.playerMove && s.playerMove === voted.move ? s.playerMove : voted.move ?? s.playerMove;
-        set({ phase: "reveal", throwLeft: 0, holdLeft: 0.9, playerMove, votes, missed: !playerMove, trauma: Math.min(1, trauma + 0.55) });
+        const playerMove = voted.move;
+        set({
+          phase: "reveal",
+          throwLeft: 0,
+          holdLeft: 0.9,
+          playerMove,
+          votes,
+          missed: !playerMove,
+          trauma: Math.min(1, trauma + 0.55),
+        });
         return;
       }
       set({ throwLeft: left, votes, trauma });
       return;
     }
+
     if (s.phase === "reveal") {
       const left = s.holdLeft - dt;
       if (left <= 0) {
         if (!s.playerMove) {
-          set({ phase: "idle", missed: true, holdLeft: 0, botMove: null, trauma });
+          set({
+            phase: "idle",
+            missed: true,
+            holdLeft: 0,
+            botMove: null,
+            trauma,
+          });
           return;
         }
         const botMove = s.botMove ?? "rock";
@@ -166,23 +184,65 @@ export const useGame = create<GameState>((set, get) => ({
         if (outcome === "lose") bot += 1;
         const history = [...s.history, { player: s.playerMove, bot: botMove, outcome }];
         const winner = matchOver(you, bot, s.series);
-        set({ phase: winner ? "matchEnd" : "roundEnd", you, bot, history, outcome, matchWinner: winner, holdLeft: winner ? 0 : 1.4, trauma: Math.min(1, trauma + (winner ? 0.9 : 0.25)) });
+        set({
+          phase: winner ? "matchEnd" : "roundEnd",
+          you,
+          bot,
+          history,
+          outcome,
+          matchWinner: winner,
+          holdLeft: winner ? 0 : 1.4,
+          trauma: Math.min(1, trauma + (winner ? 0.9 : 0.25)),
+        });
         return;
       }
       set({ holdLeft: left, trauma });
       return;
     }
+
     if (s.phase === "roundEnd") {
       const left = s.holdLeft - dt;
       if (left <= 0) {
-        set({ phase: "idle", round: s.round + 1, playerMove: null, botMove: null, outcome: null, holdLeft: 0, trauma });
+        set({
+          phase: "idle",
+          round: s.round + 1,
+          playerMove: null,
+          botMove: null,
+          outcome: null,
+          holdLeft: 0,
+          trauma,
+        });
         return;
       }
       set({ holdLeft: left, trauma });
       return;
     }
+
     if (trauma !== s.trauma) set({ trauma });
   },
-  playAgain: () => set({ phase: "idle", round: 1, you: 0, bot: 0, playerMove: null, botMove: null, outcome: null, matchWinner: null, history: [], votes: [], missed: false }),
-  backTitle: () => set({ phase: "title", round: 1, you: 0, bot: 0, playerMove: null, botMove: null, matchWinner: null, history: [] }),
+  playAgain: () =>
+    set({
+      phase: "idle",
+      round: 1,
+      you: 0,
+      bot: 0,
+      playerMove: null,
+      botMove: null,
+      outcome: null,
+      matchWinner: null,
+      history: [],
+      votes: [],
+      missed: false,
+    }),
+  backTitle: () =>
+    set({
+      phase: "title",
+      round: 1,
+      you: 0,
+      bot: 0,
+      playerMove: null,
+      botMove: null,
+      matchWinner: null,
+      history: [],
+    }),
 }));

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { SignGlyph } from "@/components/game/SignGlyph";
 import { detectFrame, loadVision } from "@/lib/game/cv";
 import { useGame } from "@/lib/game/store";
 import { copy } from "@/lib/i18n";
@@ -33,7 +34,7 @@ export function CameraStage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastTs = useRef(-1);
-  const { cameraOn, setCameraOn, setLive, markCv, live, lang, phase } = useGame();
+  const { cameraOn, setCameraOn, setLive, markCv, live, lang, phase, cvReady } = useGame();
   const t = copy[lang];
 
   useEffect(() => {
@@ -103,6 +104,9 @@ export function CameraStage() {
     return () => cancelAnimationFrame(id);
   }, [cameraOn, setLive]);
 
+  const signName =
+    live?.move === "rock" ? t.throwRock : live?.move === "paper" ? t.throwPaper : live?.move === "scissors" ? t.throwScissors : null;
+
   return (
     <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl bg-elevated sm:aspect-square">
       <video
@@ -112,10 +116,7 @@ export function CameraStage() {
         muted
         autoPlay
       />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 h-full w-full scale-x-[-1]"
-      />
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full scale-x-[-1]" />
       <div className="scanlines absolute inset-0" />
       {!cameraOn && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-elevated px-6 text-center">
@@ -130,6 +131,11 @@ export function CameraStage() {
           </button>
         </div>
       )}
+      {cameraOn && live?.move && (
+        <div className="pointer-events-none absolute end-3 top-12 size-16 text-scan">
+          <SignGlyph move={live.move} />
+        </div>
+      )}
       <div className="absolute start-3 top-3 rounded-full border border-border bg-bg/70 px-3 py-1 text-[11px] uppercase tracking-wider text-muted backdrop-blur">
         {t.you}
       </div>
@@ -139,7 +145,13 @@ export function CameraStage() {
           live?.move ? "text-scan" : "text-muted",
         )}
       >
-        {phase === "throwing" ? t.holdSign : live?.move ? `${live.gestureLabel} · ${Math.round(live.confidence * 100)}%` : t.noHand}
+        {!cvReady
+          ? t.loadingCv
+          : phase === "throwing" || phase === "countdown"
+            ? `${t.holdSign}${signName ? ` · ${signName}` : ""}`
+            : signName
+              ? `${t.seeing} · ${signName} · ${Math.round((live?.confidence ?? 0) * 100)}%`
+              : t.noHand}
       </div>
     </div>
   );
