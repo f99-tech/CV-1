@@ -29,6 +29,14 @@ npm run dev
 
 Open over **HTTPS** (or localhost). Cameras require a secure context.
 
-## Hosting
+## Live HTTPS link (phone camera)
 
-GitHub Pages cannot run this app’s Node server. Import this repo on **Vercel** (Vite) or use the Grok publish link.
+GitHub Pages cannot run this app’s Node server.
+
+Import this repo on **Vercel** for a public HTTPS URL:
+
+1. Open [vercel.com/new](https://vercel.com/new)
+2. Import `f99-tech/CV-1`
+3. Deploy
+
+Then open the Vercel URL on your phone and allow the camera.
